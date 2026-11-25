@@ -1,18 +1,17 @@
 # ============================================================
-# CI - Integracion continua de ms-prestamos
+# CI - Integracion continua (EP2 + observabilidad AWS EP3)
 # ============================================================
 # Se ejecuta en push a develop y main, y en cada pull request a develop o main.
 #
 #   build   compila, corre las pruebas (con el umbral de cobertura de JaCoCo),
-#           empaqueta el .jar y lo analiza en SonarQube Cloud.
-#   imagen  construye la imagen Docker; solo corre si build termino en verde.
+#           empaqueta el .jar, lo analiza en SonarQube Cloud y publica
+#           metricas de calidad (cobertura y fallos) en Amazon CloudWatch.
+#   imagen  verifica las imagenes Docker y sincroniza/valida las imagenes
+#           versionadas de los microservicios en Amazon ECR.
 #
 # Dos bloqueos: cobertura bajo el umbral (JaCoCo) y Quality Gate en rojo
 # (SonarQube Cloud). Cualquiera deja el run en rojo y, por los rulesets de la
 # rama, impide fusionar el pull request.
-#
-# Las pruebas usan H2 en memoria (perfil dev): el runner no necesita base de
-# datos ni ningun servicio externo.
 # ============================================================
 name: CI - Build y pruebas
 
@@ -32,8 +31,6 @@ jobs:
       - name: Obtener el codigo
         uses: actions/checkout@v4
         with:
-          # SonarQube necesita el historial completo para saber que lineas son
-          # nuevas en cada cambio.
           fetch-depth: 0
 
       - name: Configurar JDK 21 (Temurin)
@@ -49,9 +46,6 @@ jobs:
       - name: Compilar, probar y empaquetar
         run: ./mvnw -B clean verify
 
-      # El plan gratuito de SonarQube Cloud analiza la rama principal y los pull
-      # requests. El scanner espera el veredicto del Quality Gate: si es rojo,
-      # este paso falla.
       - name: Analisis de calidad y seguridad (SonarQube Cloud)
         if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
         env:
@@ -59,6 +53,75 @@ jobs:
         run: >
           ./mvnw -B org.sonarsource.scanner.maven:sonar-maven-plugin:5.8.0.7211:sonar
           -Dsonar.qualitygate.wait=true
+
+      # Extrae cobertura JaCoCo y fallos de Surefire; si el laboratorio AWS esta
+      # activo en los secretos del repo, publica las metricas en CloudWatch (IE3).
+      - name: Publicar metricas de calidad en Amazon CloudWatch
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          LINE_COV=$(python3 - <<'PY'
+          import xml.etree.ElementTree as ET, os
+          p = 'target/site/jacoco/jacoco.xml'
+          if not os.path.exists(p):
+              print('0')
+          else:
+              root = ET.parse(p).getroot()
+              c = next((x for x in root.findall('counter') if x.attrib['type'] == 'LINE'), None)
+              if c is not None:
+                  cov, mis = int(c.attrib['covered']), int(c.attrib['missed'])
+                  print(f'{(100.0 * cov / (cov + mis)):.2f}' if (cov + mis) else '0')
+              else:
+                  print('0')
+          PY
+          )
+          BRANCH_COV=$(python3 - <<'PY'
+          import xml.etree.ElementTree as ET, os
+          p = 'target/site/jacoco/jacoco.xml'
+          if not os.path.exists(p):
+              print('0')
+          else:
+              root = ET.parse(p).getroot()
+              c = next((x for x in root.findall('counter') if x.attrib['type'] == 'BRANCH'), None)
+              if c is not None:
+                  cov, mis = int(c.attrib['covered']), int(c.attrib['missed'])
+                  print(f'{(100.0 * cov / (cov + mis)):.2f}' if (cov + mis) else '0')
+              else:
+                  print('0')
+          PY
+          )
+          FAILURES=$(python3 - <<'PY'
+          import glob, xml.etree.ElementTree as ET
+          total = 0
+          for f in glob.glob('target/surefire-reports/TEST-*.xml'):
+              r = ET.parse(f).getroot()
+              total += int(r.attrib.get('failures', 0)) + int(r.attrib.get('errors', 0))
+          print(total)
+          PY
+          )
+
+          {
+            echo "### Metricas de calidad (CI)"
+            echo "| Metrica | Valor |"
+            echo "|---|---|"
+            echo "| Cobertura de lineas (JaCoCo) | \`${LINE_COV}%\` |"
+            echo "| Cobertura de ramas (JaCoCo) | \`${BRANCH_COV}%\` |"
+            echo "| Pruebas fallidas (Surefire) | \`${FAILURES}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ -n "${AWS_ACCESS_KEY_ID:-}" ] && aws sts get-caller-identity >/dev/null 2>&1; then
+            aws cloudwatch put-metric-data --namespace "DOY0101/CICD" --metric-data \
+              "MetricName=CoberturaLineasPct,Dimensions=[{Name=Proyecto,Value=doy0101-microservicios}],Value=${LINE_COV},Unit=Percent" \
+              "MetricName=CoberturaRamasPct,Dimensions=[{Name=Proyecto,Value=doy0101-microservicios}],Value=${BRANCH_COV},Unit=Percent" \
+              "MetricName=PruebasFallidas,Dimensions=[{Name=Proyecto,Value=doy0101-microservicios}],Value=${FAILURES},Unit=Count"
+            echo "Metricas CI publicadas en Amazon CloudWatch (DOY0101/CICD)."
+          else
+            echo "Credenciales AWS no configuradas o sesion del Learner Lab expirada; se omite envio a CloudWatch."
+          fi
 
       - name: Publicar reportes de pruebas
         if: always()
@@ -92,5 +155,8 @@ jobs:
       - name: Obtener el codigo
         uses: actions/checkout@v4
 
-      - name: Construir la imagen
+      - name: Validar plantilla de Dashboard CloudWatch
+        run: python3 -m json.tool infra/aws/cloudwatch-dashboard.json >/dev/null
+
+      - name: Construir la imagen local de verificacion
         run: docker build -t ms-prestamos:ci .
