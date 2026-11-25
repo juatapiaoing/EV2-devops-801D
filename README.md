@@ -9,7 +9,7 @@ Microservicio de gestión de préstamos de una biblioteca. Registra el retiro de
 ejemplar por parte de un socio, mantiene el historial de cada usuario, permite
 registrar la devolución y detecta los préstamos atrasados.
 
-Este repositorio reúne las dos evaluaciones parciales de **Ingeniería DevOps
+Este repositorio reúne las tres evaluaciones parciales de **Ingeniería DevOps
 (DOY0101, Duoc UC)**:
 
 - **Evaluación Parcial 1:** flujo de ramificación GitFlow, simulación de trabajo
@@ -19,6 +19,11 @@ Este repositorio reúne las dos evaluaciones parciales de **Ingeniería DevOps
   CI/CD ahora ejecuta pruebas con umbral de cobertura, análisis de código con
   SonarQube Cloud, vigilancia de dependencias con Dependabot y despliegue
   automático con Docker Compose (secciones 9 y 13).
+- **Evaluación Parcial 3:** despliegue orquestado **100 % en AWS** con imágenes
+  versionadas en **Amazon ECR**, orquestación en **Amazon ECS (Fargate) + Service
+  Connect** y observabilidad completa en **Amazon CloudWatch** (Container Insights,
+  Logs, Metric Filters, Alarmas y Dashboard integrado al CI/CD). Ver detalle en
+  [docs/observabilidad-aws.md](docs/observabilidad-aws.md).
 
 ## Índice
 
@@ -74,6 +79,9 @@ no en la orquestación.
 | Dependabot | — | Vigilancia de dependencias (Maven, Docker, Actions) |
 | GitHub Actions | — | Integración y despliegue continuo |
 | AWS EC2 + systemd | Ubuntu 24.04 | Despliegue de la EP1 (ver `docs/despliegue-aws.md`) |
+| Amazon ECR | — | Registro privado de imágenes Docker versionadas (`1.0.0`) |
+| Amazon ECS Fargate + Service Connect | — | Orquestación en la nube de `frontend`, `backend1` y `backend2` (`microservices-demo`) |
+| Amazon CloudWatch | Container Insights, Logs, Alarmas, Dashboard | Monitoreo, trazabilidad de logs, alertas y métricas CI/CD (`DOY0101/CICD`) |
 
 ## 3. Estructura del repositorio
 
@@ -92,11 +100,16 @@ EV1-despliegue-801D/
 │   └── init-prestamos.sql         Creación de BD y usuario de aplicación en MySQL (instalación manual)
 ├── docs/
 │   ├── despliegue-aws.md          Guía de despliegue en EC2 (aprovisionamiento, CD, operación)
+│   ├── observabilidad-aws.md      Arquitectura 100 % AWS (ECR, ECS Fargate, CloudWatch) y decisiones (EP3)
 │   ├── evidencias/                Salidas reales del despliegue en EC2 y runs de CD
 │   └── enunciado/                 Material de la evaluación
 ├── infra/aws/
-│   ├── provision-ec2.sh           Aprovisiona llaves, security group e instancia con la AWS CLI
-│   └── user-data.sh               cloud-init: JRE 21, MySQL, credenciales y unidad systemd
+│   ├── provision-ec2.sh           Aprovisiona llaves, security group e instancia EC2 (EP1)
+│   ├── user-data.sh               cloud-init: JRE 21, MySQL, credenciales y unidad systemd (EP1)
+│   ├── provision-ecs.ps1          Aprovisiona ECR, ECS Fargate, Service Connect, Logs, Alarmas y Dashboard (EP3)
+│   ├── generate-traffic.ps1       Genera tráfico HTTP real (/show_posts, /show_users y 404) hacia ECS
+│   ├── cleanup-ecs.ps1            Elimina todos los recursos AWS al finalizar la demostración
+│   └── cloudwatch-dashboard.json  Definición como código del dashboard `doy0101-microservicios-Tapia`
 ├── src/
 │   ├── main/
 │   │   ├── java/cl/jctapia/prestamos/
@@ -850,9 +863,17 @@ es mi experiencia personal con el encargo.
 La reflexión personal de la EP2 (sección 15) es de mi autoría y no fue
 redactada con IA.
 
+### Evaluación Parcial 3
+
+| Herramienta | Para qué se usó | Cómo se validó |
+|---|---|---|
+| **Antigravity (Google DeepMind)** | Apoyo en la escritura de los scripts de aprovisionamiento AWS CLI (`infra/aws/provision-ecs.ps1`, `generate-traffic.ps1`, `cleanup-ecs.ps1`), la definición JSON del dashboard de CloudWatch (`cloudwatch-dashboard.json`), la actualización de los workflows de GitHub Actions (`ci.yml` y `cd-deploy.yml`) para publicar métricas en CloudWatch y desplegar imágenes versionadas desde Amazon ECR, y la documentación técnica (`docs/observabilidad-aws.md` y `docs/evidencias/observabilidad-aws.md`). | Se ejecutó el aprovisionamiento real en la cuenta de AWS Academy (`196424683276`), verificando las imágenes `:1.0.0` en ECR, los 3 servicios en `1/1` en ECS Fargate, la aplicación web en el navegador (`http://3.91.8.147:5000`), el tráfico real en los gráficos de CloudWatch (`doy0101-microservicios-Tapia`) y las 5 alarmas en estado `OK`. |
+
 ### Referencias
 
 Anthropic. (2026). *Claude Code* (Claude Sonnet 5.5 y Claude Opus 5.5) [Modelo Grande de Lenguaje]. https://claude.com/claude-code
+
+Google DeepMind. (2026). *Antigravity* [Asistente de Ingeniería de Software con IA].
 
 Referencia institucional: https://bibliotecas.duoc.cl/ia
 
@@ -908,6 +929,20 @@ Lo que hice en el proyecto:
 - Pedí las pruebas que se agregaron con JaCoCo.
 - Controlé que el trabajo se ajustara a la pauta.
 - Decidí el cierre: revisar las vulnerabilidades y publicar la versión 2.0.
+
+### Juan Carlos Tapia — Evaluación Parcial 3
+
+Se orquestaron los 3 microservicios (`frontend`, `backend1`, `backend2`) en Amazon ECS Fargate usando imágenes versionadas (`1.0.0`) desde Amazon ECR (sin reconstruir en el runner) y monitoreo centralizado en Amazon CloudWatch.
+
+Durante el laboratorio surgieron tres dificultades técnicas principales: la restricción de AWS que impide nombrar un Security Group empezando con `sg-`, el error de inicialización del rol de Service Connect al crear el clúster en una cuenta nueva, y el ajuste de dimensiones en el dashboard de CloudWatch porque la latencia y los códigos HTTP se publican desde `frontend` hacia cada backend.
+
+Al enviar 300 peticiones válidas y 40 errores 404, se comprobó el consumo de CPU/memoria, el estado `1/1` de las tareas, las respuestas `2XX`, la latencia promedio/p99, los logs de errores 404 y las 5 alarmas en `OK`.
+
+Decisiones y validaciones propias:
+
+- Trabajar únicamente con servicios nativos de AWS.
+- Usar los microservicios entregados, versionados en Amazon ECR.
+- Verificar visualmente los gráficos del dashboard en CloudWatch y la aplicación web en ejecución.
 
 ---
 
