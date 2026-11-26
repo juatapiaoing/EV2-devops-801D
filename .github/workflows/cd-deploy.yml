@@ -119,10 +119,14 @@ jobs:
           PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids "${ENI_ID}" --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
           echo "PUBLIC_IP=${PUBLIC_IP}" >> "$GITHUB_ENV"
 
+          SCHEME="http"
+          BASE_URL="${SCHEME}://${PUBLIC_IP}:5000"
+          echo "BASE_URL=${BASE_URL}" >> "$GITHUB_ENV"
+
           for i in $(seq 1 12); do
-            if curl -fsS -X POST "http://${PUBLIC_IP}:5000/show_posts" | grep -v "Failed to fetch" >/dev/null && \
-               curl -fsS -X POST "http://${PUBLIC_IP}:5000/show_users" | grep -v "Failed to fetch" >/dev/null; then
-              echo "Prueba E2E exitosa en http://${PUBLIC_IP}:5000 (posts y users OK)"
+            if curl -fsS -X POST "${BASE_URL}/show_posts" | grep -v "Failed to fetch" >/dev/null && \
+               curl -fsS -X POST "${BASE_URL}/show_users" | grep -v "Failed to fetch" >/dev/null; then
+              echo "Prueba E2E exitosa en ${BASE_URL} (posts y users OK)"
               exit 0
             fi
             [ "$i" -eq 12 ] && { echo "El frontend no respondio correctamente en 60 s"; exit 1; }
@@ -155,6 +159,6 @@ jobs:
             echo "| Tag versionado ECR | \`${IMAGE_VERSION}\` |"
             echo "| Commit | \`${GIT_SHA}\` |"
             echo "| Servicios desplegados | \`backend1\`, \`backend2\`, \`frontend\` |"
-            echo "| Endpoint publico | \`http://${PUBLIC_IP:-N/A}:5000\` |"
+            echo "| Endpoint publico | \`${BASE_URL:-N/A}\` |"
             echo "| Duracion despliegue | \`${DEPLOY_DURATION:-N/A}s\` |"
           } >> "$GITHUB_STEP_SUMMARY"
