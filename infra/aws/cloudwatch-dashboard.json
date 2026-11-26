@@ -1,0 +1,235 @@
+{
+  "widgets": [
+    {
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 24,
+      "height": 3,
+      "properties": {
+        "markdown": "# DOY0101 — Orquestacion y Observabilidad de Microservicios en AWS\n**Evaluacion Parcial N°3 / Actividad 3.2** | **Autor:** Juan Carlos Tapia | **Arquitectura 100% AWS:** Amazon ECR (imagenes versionadas `1.0.0`) + Amazon ECS Fargate (`doy0101-ecs`) + ECS Service Connect (`microservices-demo`) + Amazon CloudWatch (Container Insights, Service Connect, Logs, Alarmas y Metricas CI/CD)"
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 3,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "W1 - CPU y Memoria (Container Insights)",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "stat": "Average",
+        "period": 60,
+        "metrics": [
+          ["ECS/ContainerInsights", "CpuUtilized", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", { "label": "frontend CPU" }],
+          ["ECS/ContainerInsights", "CpuUtilized", "ClusterName", "doy0101-ecs", "ServiceName", "backend1", { "label": "backend1 CPU" }],
+          ["ECS/ContainerInsights", "CpuUtilized", "ClusterName", "doy0101-ecs", "ServiceName", "backend2", { "label": "backend2 CPU" }],
+          ["ECS/ContainerInsights", "MemoryUtilized", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", { "yAxis": "right", "label": "frontend Mem (MiB)" }],
+          ["ECS/ContainerInsights", "MemoryUtilized", "ClusterName", "doy0101-ecs", "ServiceName", "backend1", { "yAxis": "right", "label": "backend1 Mem (MiB)" }],
+          ["ECS/ContainerInsights", "MemoryUtilized", "ClusterName", "doy0101-ecs", "ServiceName", "backend2", { "yAxis": "right", "label": "backend2 Mem (MiB)" }]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 3,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "W2 - Disponibilidad: Tareas Running vs Desired",
+        "view": "singleValue",
+        "region": "us-east-1",
+        "stat": "Minimum",
+        "period": 60,
+        "metrics": [
+          ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", { "label": "frontend Running" }],
+          ["ECS/ContainerInsights", "DesiredTaskCount", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", { "label": "frontend Desired" }],
+          ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "doy0101-ecs", "ServiceName", "backend1", { "label": "backend1 Running" }],
+          ["ECS/ContainerInsights", "DesiredTaskCount", "ClusterName", "doy0101-ecs", "ServiceName", "backend1", { "label": "backend1 Desired" }],
+          ["ECS/ContainerInsights", "RunningTaskCount", "ClusterName", "doy0101-ecs", "ServiceName", "backend2", { "label": "backend2 Running" }],
+          ["ECS/ContainerInsights", "DesiredTaskCount", "ClusterName", "doy0101-ecs", "ServiceName", "backend2", { "label": "backend2 Desired" }]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 9,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "W3 - Trafico de Red Rx / Tx (Container Insights)",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "stat": "Average",
+        "period": 60,
+        "metrics": [
+          ["ECS/ContainerInsights", "NetworkRxBytes", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", { "label": "frontend Rx" }],
+          ["ECS/ContainerInsights", "NetworkTxBytes", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", { "label": "frontend Tx" }],
+          ["ECS/ContainerInsights", "NetworkRxBytes", "ClusterName", "doy0101-ecs", "ServiceName", "backend1", { "label": "backend1 Rx" }],
+          ["ECS/ContainerInsights", "NetworkTxBytes", "ClusterName", "doy0101-ecs", "ServiceName", "backend1", { "label": "backend1 Tx" }],
+          ["ECS/ContainerInsights", "NetworkRxBytes", "ClusterName", "doy0101-ecs", "ServiceName", "backend2", { "label": "backend2 Rx" }],
+          ["ECS/ContainerInsights", "NetworkTxBytes", "ClusterName", "doy0101-ecs", "ServiceName", "backend2", { "label": "backend2 Tx" }]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 9,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "W4 - Peticiones recibidas (backend1 y backend2)",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          ["AWS/ECS", "RequestCount", "ClusterName", "doy0101-ecs", "DiscoveryName", "backend1", "ServiceName", "backend1", { "label": "backend1 RequestCount" }],
+          ["AWS/ECS", "RequestCount", "ClusterName", "doy0101-ecs", "DiscoveryName", "backend2", "ServiceName", "backend2", { "label": "backend2 RequestCount" }]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 15,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "W5 - Latencia TargetResponseTime (Promedio y p99)",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "period": 60,
+        "metrics": [
+          ["AWS/ECS", "TargetResponseTime", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend1", { "stat": "Average", "label": "backend1 Avg (ms)" }],
+          ["AWS/ECS", "TargetResponseTime", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend1", { "stat": "p99", "label": "backend1 p99 (ms)" }],
+          ["AWS/ECS", "TargetResponseTime", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend2", { "stat": "Average", "label": "backend2 Avg (ms)" }],
+          ["AWS/ECS", "TargetResponseTime", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend2", { "stat": "p99", "label": "backend2 p99 (ms)" }]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 15,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "W6 - Codigos HTTP 2XX / 4XX / 5XX (Apilado)",
+        "view": "timeSeries",
+        "stacked": true,
+        "region": "us-east-1",
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          ["AWS/ECS", "HTTPCode_Target_2XX_Count", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend1", { "color": "#2ca02c", "label": "backend1 2XX" }],
+          ["AWS/ECS", "HTTPCode_Target_2XX_Count", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend2", { "color": "#98df8a", "label": "backend2 2XX" }],
+          ["AWS/ECS", "HTTPCode_Target_4XX_Count", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend1", { "color": "#ff7f0e", "label": "backend1 4XX" }],
+          ["AWS/ECS", "HTTPCode_Target_4XX_Count", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend2", { "color": "#ffbb78", "label": "backend2 4XX" }],
+          ["AWS/ECS", "HTTPCode_Target_5XX_Count", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend1", { "color": "#d62728", "label": "backend1 5XX" }],
+          ["AWS/ECS", "HTTPCode_Target_5XX_Count", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend2", { "color": "#ff9896", "label": "backend2 5XX" }]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 21,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "W7 - Trafico frontend -> backends (Service Connect)",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          ["AWS/ECS", "RequestCountPerTarget", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend1", { "label": "frontend -> backend1" }],
+          ["AWS/ECS", "RequestCountPerTarget", "ClusterName", "doy0101-ecs", "ServiceName", "frontend", "TargetDiscoveryName", "backend2", { "label": "frontend -> backend2" }]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 21,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "W8 - Conexiones activas y nuevas (backend1 y backend2)",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "period": 60,
+        "metrics": [
+          ["AWS/ECS", "ActiveConnectionCount", "ClusterName", "doy0101-ecs", "DiscoveryName", "backend1", "ServiceName", "backend1", { "stat": "Average", "label": "backend1 Active (Avg)" }],
+          ["AWS/ECS", "NewConnectionCount", "ClusterName", "doy0101-ecs", "DiscoveryName", "backend1", "ServiceName", "backend1", { "stat": "Sum", "label": "backend1 New (Sum)" }],
+          ["AWS/ECS", "ActiveConnectionCount", "ClusterName", "doy0101-ecs", "DiscoveryName", "backend2", "ServiceName", "backend2", { "stat": "Average", "label": "backend2 Active (Avg)" }],
+          ["AWS/ECS", "NewConnectionCount", "ClusterName", "doy0101-ecs", "DiscoveryName", "backend2", "ServiceName", "backend2", { "stat": "Sum", "label": "backend2 New (Sum)" }]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 0,
+      "y": 27,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "W9 - Metricas CI/CD integradas (Tiempo despliegue, Cobertura, Errores)",
+        "view": "singleValue",
+        "region": "us-east-1",
+        "period": 300,
+        "metrics": [
+          ["DOY0101/CICD", "TiempoDespliegueSegundos", "Proyecto", "doy0101-microservicios", { "stat": "Average", "label": "Tiempo Despliegue (s)" }],
+          ["DOY0101/CICD", "CoberturaLineasPct", "Proyecto", "doy0101-microservicios", { "stat": "Maximum", "label": "Cobertura Lineas (%)" }],
+          ["DOY0101/CICD", "CoberturaRamasPct", "Proyecto", "doy0101-microservicios", { "stat": "Maximum", "label": "Cobertura Ramas (%)" }],
+          ["DOY0101/CICD", "PruebasFallidas", "Proyecto", "doy0101-microservicios", { "stat": "Sum", "label": "Pruebas Fallidas" }],
+          ["DOY0101/CICD", "ErroresDespliegue", "Proyecto", "doy0101-microservicios", { "stat": "Sum", "label": "Errores Despliegue" }]
+        ]
+      }
+    },
+    {
+      "type": "metric",
+      "x": 12,
+      "y": 27,
+      "width": 12,
+      "height": 6,
+      "properties": {
+        "title": "W10 - Errores HTTP 404/500 en Logs (Metric Filters)",
+        "view": "timeSeries",
+        "stacked": false,
+        "region": "us-east-1",
+        "stat": "Sum",
+        "period": 60,
+        "metrics": [
+          ["DOY0101/AppLogs", "Frontend404Count", { "color": "#ff7f0e", "label": "Frontend 404" }],
+          ["DOY0101/AppLogs", "BackendErrorCount", { "color": "#d62728", "label": "Backends ERROR/500" }]
+        ]
+      }
+    },
+    {
+      "type": "log",
+      "x": 0,
+      "y": 33,
+      "width": 24,
+      "height": 6,
+      "properties": {
+        "title": "W11 - CloudWatch Logs Insights (/ecs/frontend, /ecs/backend1, /ecs/backend2)",
+        "region": "us-east-1",
+        "query": "SOURCE '/ecs/frontend' | SOURCE '/ecs/backend1' | SOURCE '/ecs/backend2' | fields @timestamp, @logStream, @message | sort @timestamp desc | limit 30",
+        "view": "table"
+      }
+    }
+  ]
+}

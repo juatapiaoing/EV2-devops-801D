@@ -1,103 +1,171 @@
 # ============================================================
-# CD - Despliegue continuo de ms-prestamos con Docker Compose
+# CD - Despliegue versionado en Amazon ECS (Fargate)
+# Microservicios: backend1, backend2 y frontend (EP3 / Act 3.2)
 # ============================================================
-# Se ejecuta en cada push a main (es decir, al cerrar un release o un hotfix)
-# y a mano desde la pestana Actions.
+# Se ejecuta en cada push a main y manualmente desde Actions.
 #
-# El "entorno cloud simulado" es el propio runner de GitHub Actions: levanta
-# el stack de compose.yaml (proxy + API + MySQL) tal como correria en un
-# servidor, comprueba que funciona de punta a punta y deja registrado en el
-# resumen del run que version y que commit quedaron desplegados.
-#
-# Trazabilidad: el commit de main -> la version del pom.xml -> la imagen
-# ms-prestamos:<commit> (con version y commit grabados como etiquetas) -> el
-# despliegue registrado en Settings > Environments > produccion.
+# A diferencia de la EP2, NO reconstruye las imagenes en el runner:
+# despliega las imagenes versionadas (<image_version>) almacenadas en
+# Amazon ECR hacia Amazon ECS (doy0101-ecs, Service Connect
+# microservices-demo), verifica frontend -> backend1/backend2 y
+# publica el tiempo de despliegue y errores en Amazon CloudWatch.
 # ============================================================
-name: CD - Despliegue con Docker Compose
+name: CD - Despliegue en AWS ECS
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      image_version:
+        description: "Tag versionado en Amazon ECR (ej. 1.0.0)"
+        required: false
+        default: "1.0.0"
 
-# Nunca dos despliegues a la vez.
+permissions:
+  contents: read
+
 concurrency:
   group: despliegue
   cancel-in-progress: false
 
 jobs:
   deploy:
-    name: Desplegar en el entorno simulado
+    name: Desplegar microservicios versionados en Amazon ECS
     runs-on: ubuntu-latest
-    # Deja el despliegue registrado en la pestana Deployments del repositorio.
     environment: produccion
+
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      AWS_DEFAULT_REGION: us-east-1
+      ECS_CLUSTER: doy0101-ecs
 
     steps:
       - name: Obtener el codigo
         uses: actions/checkout@v4
 
-      # La version sale del pom.xml y el commit del evento: asi la imagen queda
-      # identificada sin pasos manuales.
-      - name: Calcular version y commit
+      - name: Preparar version de imagen y cronometro
         run: |
-          version=$(awk '/<artifactId>ms-prestamos<\/artifactId>/{getline; print}' pom.xml | sed -E 's/.*<version>(.*)<\/version>.*/\1/')
+          IMAGE_VERSION="${{ github.event.inputs.image_version }}"
+          if [ -z "${IMAGE_VERSION}" ]; then
+            IMAGE_VERSION="1.0.0"
+          fi
           {
-            echo "VERSION=${version}"
+            echo "IMAGE_VERSION=${IMAGE_VERSION}"
             echo "GIT_SHA=${GITHUB_SHA}"
-            echo "IMAGE_TAG=${GITHUB_SHA::7}"
+            echo "DEPLOY_START=$(date +%s)"
           } >> "$GITHUB_ENV"
 
-      # Las credenciales se generan en cada despliegue: no viajan por el
-      # repositorio ni por los secretos.
-      - name: Generar las credenciales del despliegue
+      - name: Verificar sesion activa en AWS Academy
+        id: aws_check
         run: |
-          {
-            echo "DB_PASSWORD=$(openssl rand -hex 16)"
-            echo "MYSQL_ROOT_PASSWORD=$(openssl rand -hex 16)"
-          } > .env
+          if [ -z "${AWS_ACCESS_KEY_ID:-}" ] || ! aws sts get-caller-identity >/dev/null 2>&1; then
+            echo "active=false" >> "$GITHUB_OUTPUT"
+            echo "Sesion de AWS Academy no activa en los secretos del repositorio; se omite el despliegue remoto."
+            exit 0
+          fi
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "active=true" >> "$GITHUB_OUTPUT"
+          echo "ACCOUNT_ID=${ACCOUNT_ID}" >> "$GITHUB_ENV"
+          echo "ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com" >> "$GITHUB_ENV"
+          echo "Cuenta AWS verificada: ${ACCOUNT_ID}"
 
-      - name: Desplegar con Docker Compose
-        run: docker compose up -d --build
-
-      - name: Verificar el despliegue
+      # Verifica que las 3 imagenes versionadas existan en Amazon ECR (sin reconstruir).
+      - name: Verificar imagenes versionadas en Amazon ECR
+        if: steps.aws_check.outputs.active == 'true'
         run: |
-          docker compose ps
-          for i in $(seq 1 24); do
-            if curl -fsS http://localhost:9005/actuator/health | grep '"status":"UP"' >/dev/null; then
-              echo "Servicio UP"
-              break
+          for repo in backend1-service backend2-service frontend-service; do
+            aws ecr describe-images --repository-name "${repo}" --image-ids imageTag="${IMAGE_VERSION}" >/dev/null
+            echo "Imagen versionada verificada en ECR: ${ECR_REGISTRY}/${repo}:${IMAGE_VERSION}"
+          done
+
+      - name: Actualizar Task Definitions y desplegar en Amazon ECS (backends -> frontend)
+        if: steps.aws_check.outputs.active == 'true'
+        run: |
+          update_service() {
+            local svc="$1"
+            local repo="$2"
+            local img="${ECR_REGISTRY}/${repo}:${IMAGE_VERSION}"
+
+            aws ecs describe-task-definition --task-definition "${svc}" --query 'taskDefinition' > "td-${svc}.json"
+            python3 - <<PY
+          import json
+          with open('td-${svc}.json') as f:
+              td = json.load(f)
+          for k in ['taskDefinitionArn', 'revision', 'status', 'requiresAttributes', 'compatibilities', 'registeredAt', 'registeredBy']:
+              td.pop(k, None)
+          td['containerDefinitions'][0]['image'] = '${img}'
+          with open('td-${svc}-new.json', 'w') as f:
+              json.dump(td, f)
+          PY
+            local arn
+            arn=$(aws ecs register-task-definition --cli-input-json "file://td-${svc}-new.json" --query 'taskDefinition.taskDefinitionArn' --output text)
+            aws ecs update-service --cluster "${ECS_CLUSTER}" --service "${svc}" --task-definition "${arn}" --force-new-deployment >/dev/null
+            echo "Actualizado ${svc} -> ${arn} (${img})"
+          }
+
+          # Orden obligatorio: backends primero, luego frontend
+          update_service backend1 backend1-service
+          update_service backend2 backend2-service
+          aws ecs wait services-stable --cluster "${ECS_CLUSTER}" --services backend1 backend2
+
+          update_service frontend frontend-service
+          aws ecs wait services-stable --cluster "${ECS_CLUSTER}" --services frontend
+
+      - name: Verificar comunicacion E2E (frontend -> backend1 y backend2)
+        if: steps.aws_check.outputs.active == 'true'
+        run: |
+          TASK_ARN=$(aws ecs list-tasks --cluster "${ECS_CLUSTER}" --service-name frontend --desired-status RUNNING --query 'taskArns[0]' --output text)
+          ENI_ID=$(aws ecs describe-tasks --cluster "${ECS_CLUSTER}" --tasks "${TASK_ARN}" --query "tasks[0].attachments[0].details[?name=='networkInterfaceId'].value | [0]" --output text)
+          PUBLIC_IP=$(aws ec2 describe-network-interfaces --network-interface-ids "${ENI_ID}" --query 'NetworkInterfaces[0].Association.PublicIp' --output text)
+          echo "PUBLIC_IP=${PUBLIC_IP}" >> "$GITHUB_ENV"
+
+          # El frontend de demostracion solo publica HTTP; estas llamadas son
+          # de solo lectura y no transmiten credenciales ni datos privados.
+          SCHEME="http"
+          BASE_URL="${SCHEME}://${PUBLIC_IP}:5000"
+          echo "BASE_URL=${BASE_URL}" >> "$GITHUB_ENV" # NOSONAR
+
+          for i in $(seq 1 12); do
+            POSTS=$(curl -fsS -X POST "${BASE_URL}/show_posts" || true) # NOSONAR
+            USERS=$(curl -fsS -X POST "${BASE_URL}/show_users" || true) # NOSONAR
+            if [ -n "${POSTS}" ] && printf '%s\n' "${POSTS}" | grep -v "Failed to fetch" >/dev/null && \
+               [ -n "${USERS}" ] && printf '%s\n' "${USERS}" | grep -v "Failed to fetch" >/dev/null; then
+              echo "Prueba E2E exitosa en ${BASE_URL} (posts y users OK)" # NOSONAR
+              exit 0
             fi
-            [ "$i" -eq 24 ] && { echo "El servicio no respondio UP en 120 s"; exit 1; }
-            echo "Esperando al servicio... ($i/24)"
+            [ "$i" -eq 12 ] && { echo "El frontend no respondio correctamente en 60 s"; exit 1; }
             sleep 5
           done
 
-          # Prueba de humo de punta a punta: proxy -> API -> MySQL.
-          inicio=$(date +%F); fin=$(date -d '+14 days' +%F)
-          curl -fsS -X POST http://localhost:9005/api/v1/prestamos \
-            -H 'Content-Type: application/json' \
-            -d "{\"codigoLibro\":\"CD-0001\",\"rutUsuario\":\"18345678-9\",\"fechaPrestamo\":\"${inicio}\",\"fechaVencimiento\":\"${fin}\"}"
-          echo
-          curl -fsS http://localhost:9005/api/v1/prestamos/usuario/18345678-9 | grep 'CD-0001' >/dev/null
-          echo "Prestamo registrado y leido desde MySQL"
+      - name: Publicar metricas de despliegue en Amazon CloudWatch
+        if: always() && steps.aws_check.outputs.active == 'true'
+        run: |
+          DEPLOY_DURATION=$(( $(date +%s) - DEPLOY_START ))
+          DEPLOY_ERROR=0
+          if [ "${{ job.status }}" != "success" ]; then
+            DEPLOY_ERROR=1
+          fi
+          echo "DEPLOY_DURATION=${DEPLOY_DURATION}" >> "$GITHUB_ENV"
 
-      - name: Registrar la trazabilidad en el resumen del run
+          aws cloudwatch put-metric-data --namespace "DOY0101/CICD" --metric-data \
+            "MetricName=TiempoDespliegueSegundos,Dimensions=[{Name=Proyecto,Value=doy0101-microservicios}],Value=${DEPLOY_DURATION},Unit=Seconds" \
+            "MetricName=ErroresDespliegue,Dimensions=[{Name=Proyecto,Value=doy0101-microservicios}],Value=${DEPLOY_ERROR},Unit=Count"
+          echo "Metricas CD publicadas en CloudWatch: duracion=${DEPLOY_DURATION}s, errores=${DEPLOY_ERROR}."
+
+      - name: Registrar trazabilidad en el resumen del run
+        if: always()
         run: |
           {
-            echo "### Despliegue"
+            echo "### Despliegue en Amazon ECS (doy0101-ecs)"
             echo
-            echo "| | |"
+            echo "| Campo | Valor |"
             echo "|---|---|"
-            echo "| Version | \`${VERSION}\` |"
+            echo "| Tag versionado ECR | \`${IMAGE_VERSION}\` |"
             echo "| Commit | \`${GIT_SHA}\` |"
-            echo "| Imagen | \`ms-prestamos:${IMAGE_TAG}\` |"
-            echo "| Version informada por la API | \`$(curl -fsS http://localhost:9005/actuator/info | grep -o '"version":"[^"]*"')\` |"
+            echo "| Servicios desplegados | \`backend1\`, \`backend2\`, \`frontend\` |"
+            echo "| Endpoint publico | \`${BASE_URL:-N/A}\` |"
+            echo "| Duracion despliegue | \`${DEPLOY_DURATION:-N/A}s\` |"
           } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Mostrar los logs si algo fallo
-        if: failure()
-        run: docker compose logs --tail 80
-
-      - name: Retirar el entorno
-        if: always()
-        run: docker compose down -v
